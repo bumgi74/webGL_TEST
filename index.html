@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Unity WebGL Player | Kai</title>
+    <link rel="shortcut icon" href="TemplateData/favicon.ico">
+    <link rel="stylesheet" href="TemplateData/style.css">
+  </head>
+  <body>
+    <div id="unity-container" class="unity-desktop">
+      <canvas id="unity-canvas" width=1100 height=920></canvas>
+      <div id="unity-loading-bar">
+        <div id="unity-logo"></div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-warning"> </div>
+      <div id="unity-footer">
+        <div id="unity-webgl-logo"></div>
+        <div id="unity-fullscreen-button"></div>
+        <div id="unity-build-title">Kai</div>
+      </div>
+    </div>
+    <div id="test-ui" class="test-recv-message-from-unity">
+      <h2>Message from Unity</h2>
+      <p id="lblMessage">...</p>
+    </div>
+    <div id="test-ui" class="test-send-message-to-unity">
+      <h2>Test send data web2unity</h2>
+      <button onclick="sendDataWeb2Unity()">TestSendWeb2Unity</button>
+    </div>
+    <script>
+      var container = document.querySelector("#unity-container");
+      var canvas = document.querySelector("#unity-canvas");
+      var loadingBar = document.querySelector("#unity-loading-bar");
+      var progressBarFull = document.querySelector("#unity-progress-bar-full");
+      var fullscreenButton = document.querySelector("#unity-fullscreen-button");
+      var warningBanner = document.querySelector("#unity-warning");
+
+      // Shows a temporary message banner/ribbon for a few seconds, or
+      // a permanent error message on top of the canvas if type=='error'.
+      // If type=='warning', a yellow highlight color is used.
+      // Modify or remove this function to customize the visually presented
+      // way that non-critical warnings and error messages are presented to the
+      // user.
+      function unityShowBanner(msg, type) {
+        function updateBannerVisibility() {
+          warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+        }
+        var div = document.createElement('div');
+        div.innerHTML = msg;
+        warningBanner.appendChild(div);
+        if (type == 'error') div.style = 'background: red; padding: 10px;';
+        else {
+          if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+          setTimeout(function() {
+            warningBanner.removeChild(div);
+            updateBannerVisibility();
+          }, 5000);
+        }
+        updateBannerVisibility();
+      }
+
+      var buildUrl = "Build";
+      var loaderUrl = buildUrl + "/webgl.loader.js";
+      var config = {
+        dataUrl: buildUrl + "/webgl.data.unityweb",
+        frameworkUrl: buildUrl + "/webgl.framework.js.unityweb",
+        codeUrl: buildUrl + "/webgl.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "DMLab",
+        productName: "Kai",
+        productVersion: "1.0.5",
+        showBanner: unityShowBanner,
+      };
+
+      // By default Unity keeps WebGL canvas render target size matched with
+      // the DOM size of the canvas element (scaled by window.devicePixelRatio)
+      // Set this to false if you want to decouple this synchronization from
+      // happening inside the engine, and you would instead like to size up
+      // the canvas DOM size and WebGL render target sizes yourself.
+      // config.matchWebGLToCanvasSize = false;
+
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        // Mobile device style: fill the whole browser client area with the game canvas:
+
+        var meta = document.createElement('meta');
+        meta.name = 'viewport';
+        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+        document.getElementsByTagName('head')[0].appendChild(meta);
+        container.className = "unity-mobile";
+
+        // To lower canvas resolution on mobile devices to gain some
+        // performance, uncomment the following line:
+        // config.devicePixelRatio = 1;
+
+        canvas.style.width = window.innerWidth + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+      } else {
+        // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
+
+        canvas.style.width = "1100px";
+        canvas.style.height = "920px";
+      }
+
+      loadingBar.style.display = "block";
+
+      var myGameInstance = null;
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = () => {
+        createUnityInstance(canvas, config, (progress) => {
+          progressBarFull.style.width = 100 * progress + "%";
+        }).then((unityInstance) => {
+            myGameInstance = unityInstance;
+          loadingBar.style.display = "none";
+          fullscreenButton.onclick = () => {
+            unityInstance.SetFullscreen(1);
+          };
+        }).catch((message) => {
+          alert(message);
+        });
+      };
+      document.body.appendChild(script);
+
+      function sendDataWeb2Unity() 
+      {
+        myGameInstance.SendMessage("GameManager", "OnFlutter2UnityMsg", "{\"event_idle\":1}");
+      }
+
+      // Function which receives a message from Unity
+      function receiveMessageFromUnity(txt) {
+          // Get element to assign the message
+          const lblMessage = document.getElementById("lblMessage");
+          // Assign received from Unity message
+          lblMessage.innerText = txt;
+      }
+
+      // Added 22.10.06 new receive text function
+      function receiveFlutterMessageFromUnity(txt) {
+          //< Hello World !!!
+          console.log(txt);
+      }
+
+
+      //-----------------------------------------------------------------
+      var audioContext = null;
+      var audioInput = null;
+      var microphone_stream = null;
+      var recorder = null;
+
+      // The pointer to write PCM data directly into the Unity app's
+      // memory heap.
+      var floatPCMPointer = -1;
+
+      // These need to match the enums in the WebMic.cs file
+      const MicState =
+      {
+          Booting: 0,
+          NotActive: 1,
+          Recording: 2
+      }
+
+      // Starts recording from a microphone.
+      // called from WebMic.jslib's Recording_Start()
+      function StartMic() {
+          myGameInstance.SendMessage("Managers", "NotifyRecordingChange", MicState.Booting);
+
+          if (!navigator.getUserMedia) {
+              navigator.getUserMedia =
+                  navigator.getUserMedia ||
+                  navigator.webkitGetUserMedia ||
+                  navigator.mozGetUserMedia ||
+                  navigator.msGetUserMedia;
+          }
+
+          if (navigator.getUserMedia) {
+              navigator.getUserMedia(
+                  { audio:  {
+                    autoGainControl: false,
+                    noiseSuppression: false,
+                    echoCancellation: false,
+                  }, },
+                  function (stream) {
+                      start_microphone(stream);
+                  },
+                  function (e) {
+                      myGameInstance.SendMessage("Managers", "NotifyRecordingChange", MicState.NotActive);
+                      alert('Error capturing audio.');
+                  }
+              );
+          }
+          else {
+              alert('getUserMedia not supported in this browser.');
+              myGameInstance.SendMessage("Managers", "NotifyRecordingChange", MicState.NotActive);
+          }
+      }
+
+      // Callback worker for StartMic().
+      function start_microphone(stream) {
+          // Make sure sample rate matches Unity's
+          audioContext = new AudioContext({ "sampleRate": 16000 }); // { "sampleRate": 44100 }
+          microphone_stream = audioContext.createMediaStreamSource(stream);
+
+          //const bufferSize = 2048;			// This must agree with the buffer size for WebMic
+          const bufferSize = 4096;			// This must agree with the buffer size for WebMic
+          const numberOfInputChannels = 1;	// Mono audio
+          const numberOfOutputChannels = 1;	// Don't care about this
+          if (audioContext.createScriptProcessor) {
+              recorder = audioContext.createScriptProcessor(bufferSize, numberOfInputChannels, numberOfOutputChannels);
+          }
+          else {
+              recorder = audioContext.createJavaScriptNode(bufferSize, numberOfInputChannels, numberOfOutputChannels);
+          }
+
+          recorder.onaudioprocess = function (e) {
+              dstPtr = floatPCMPointer;
+              floatPCM = e.inputBuffer.getChannelData(0);
+              myGameInstance.SendMessage("Managers", "LogWrittenBuffer", floatPCM.length);
+
+              writeTarg = new Float32Array(myGameInstance.Module.HEAP8.buffer, dstPtr, bufferSize);
+              writeTarg.set(floatPCM);
+          }
+
+          // we connect the recorder with the input stream
+          microphone_stream.connect(recorder);
+          recorder.connect(audioContext.destination)
+
+          myGameInstance.SendMessage("Managers", "NotifyRecordingChange", MicState.Recording);
+      }
+
+      // called from WebMic.jslib's Recording_Stop()
+      function StopMic() {
+          if (audioContext == null)
+              return;
+
+          recorder.disconnect(audioContext.destination);
+          microphone_stream.disconnect(recorder);
+
+          audioContext = null;
+          recorder = null;
+          microphone_stream = null;
+
+          myGameInstance.SendMessage("Managers", "NotifyRecordingChange", MicState.NotActive);
+      }
+    </script>
+  </body>
+</html>
